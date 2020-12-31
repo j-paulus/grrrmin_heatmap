@@ -68,6 +68,7 @@ from pathlib import Path  # home directory
 
 import argparse  # command line handling
 
+__version__ = 0.2
 
 # default path to GarminDB database file
 garmin_db = '{}/HealthData/DBs/garmin_activities.db'.format(Path.home())
@@ -79,6 +80,9 @@ steps_template = 'SELECT activities.activity_id AS activity_id, activities.name 
 
 cycle_query = 'SELECT activities.activity_id AS activity_id, activities.name AS name, activities.description AS description, activities.start_time AS start_time, activities.stop_time AS stop_time, activities.elapsed_time AS elapsed_time, ROUND(activities.distance, 1) AS distance ' \
               'FROM activities WHERE activities.sport == "cycling" OR activities.sport == "Biking" ORDER BY activities.start_time ASC'
+
+all_activities_query = 'SELECT activities.activity_id AS activity_id, activities.name AS name, activities.description AS description, activities.start_time AS start_time, activities.stop_time AS stop_time, activities.elapsed_time AS elapsed_time, ROUND(activities.distance, 1) AS distance ' \
+                       'FROM activities ORDER BY activities.start_time ASC'
 
 
 def get_year_range(year_list):
@@ -190,6 +194,9 @@ def run_plotting(args):
     if args.sport == 'cycling':
         act_query = cycle_query
         
+    elif args.sport == 'all':
+        act_query = all_activities_query
+
     elif args.sport == 'running':
         act_filter = 'WHERE Activities.sport == "running"'
         act_query = steps_template.format(act_filter=act_filter)
@@ -424,8 +431,8 @@ def main(argv):
     argparser.add_argument('--sport',
                            action='store',
                            type=str,
-                           default='steps',
-                           choices=('steps', 'running', 'walking', 'hiking', 'cycling'),
+                           default='all',
+                           choices=('steps', 'running', 'walking', 'hiking', 'cycling', 'all'),
                            help='sport type filter')
 
     argparser.add_argument('--year',
