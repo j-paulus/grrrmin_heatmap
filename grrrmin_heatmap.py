@@ -13,12 +13,15 @@
 #  # all cycling activities from of all times using satellite image background:
 #  python grrrmin_heatmap.py --sport cycling --basemap_provider Esri.WorldImagery
 #
+# The real bounding box of the resulting map is guided by the given (or determined bounding box),
+# but in the end decided by the contextily library providing the map tiles.
+#
 #
 # (c) Jouni Paulus, 28.12.2020
 #
 # License: BSD-3-Clause
 #
-# Copyright 2020 Jouni Paulus
+# Copyright 2020-2021 Jouni Paulus
 #
 # Redistribution and use in source and binary forms, with or without modification, 
 # are permitted provided that the following conditions are met:
@@ -68,20 +71,20 @@ from pathlib import Path  # home directory
 
 import argparse  # command line handling
 
-__version__ = 0.2
+__version__ = 0.22
 
 # default path to GarminDB database file
 garmin_db = '{}/HealthData/DBs/garmin_activities.db'.format(Path.home())
 
 geod_conv = pyproj.Geod(ellps='WGS84')
 
-steps_template = 'SELECT activities.activity_id AS activity_id, activities.name AS name, activities.description AS description, activities.start_time AS start_time, activities.stop_time AS stop_time, activities.elapsed_time AS elapsed_time, ROUND(activities.distance, 1) AS distance '\
+steps_template = 'SELECT activities.activity_id, activities.name, activities.description, activities.start_time, activities.stop_time, activities.elapsed_time, ROUND(activities.distance, 1) '\
                  'FROM steps_activities JOIN activities ON activities.activity_id = steps_activities.activity_id {act_filter} ORDER BY activities.start_time ASC'
 
-cycle_query = 'SELECT activities.activity_id AS activity_id, activities.name AS name, activities.description AS description, activities.start_time AS start_time, activities.stop_time AS stop_time, activities.elapsed_time AS elapsed_time, ROUND(activities.distance, 1) AS distance ' \
+cycle_query = 'SELECT activities.activity_id, activities.name, activities.description, activities.start_time, activities.stop_time, activities.elapsed_time, ROUND(activities.distance, 1) ' \
               'FROM activities WHERE activities.sport == "cycling" OR activities.sport == "Biking" ORDER BY activities.start_time ASC'
 
-all_activities_query = 'SELECT activities.activity_id AS activity_id, activities.name AS name, activities.description AS description, activities.start_time AS start_time, activities.stop_time AS stop_time, activities.elapsed_time AS elapsed_time, ROUND(activities.distance, 1) AS distance ' \
+all_activities_query = 'SELECT activities.activity_id, activities.name, activities.description, activities.start_time, activities.stop_time, activities.elapsed_time, ROUND(activities.distance, 1) ' \
                        'FROM activities ORDER BY activities.start_time ASC'
 
 
@@ -156,16 +159,21 @@ def run_plotting(args):
     args : Namespace with field fields: 
         bounding_box : None, 4-list/tuple of floats
             define image bounding box in decimal WGS84: n, e, s, w. None for automatic
+        bb_percentile : float
+            in range 0..1, when determining the bounding box from the data, use bb_percentile 
+            and 1-bb_percentile quantiles as the limits to filter outliers. 0 for min/max
         zoom_level: None, int
             None for automatic zoom level, otherwise the given int
         sport : string in 'cycling, 'running', 'hiking', 'walking', 'steps'
             activity type to plot
-        basemap_provider : string
+        basemap_provider : string, None
             Contextily basemap provider name string
+        img_width : int
+            if basemap_provider == None, width of the blank image
         track_colormap : string
             matplotlib colormap name
         max_point_dist : float, None
-            if not None and consecutinve track points are further than 
+            if not None and consecutive track points are further than 
             this, the track is split into two
         year : list of ints
             list of years to plot, e.g., [2019, 2020]
@@ -180,10 +188,8 @@ def run_plotting(args):
 
     else:
         # determine from data
-        max_lon = -180.0
-        max_lat = -180.0
-        min_lon = 180.0
-        min_lat = 180.0
+        all_lat = []
+        all_lon = []
 
     if args.zoom_level is None:
         zoom_level = 'auto'
@@ -239,7 +245,7 @@ def run_plotting(args):
     for act_id, act_time, act_dist in act_ite:
         if (len(args.year) == 0) or (act_time.year in args.year):
             total_dist += act_dist
-            c.execute('SELECT activity_records.activity_id AS activity_id, activity_records.timestamp AS time, activity_records.position_lat AS lat, activity_records.position_long AS long FROM activity_records WHERE activity_records.activity_id = (?) ORDER BY activity_records.timestamp DESC', (act_id,))
+            c.execute('SELECT activity_records.activity_id, activity_records.timestamp, activity_records.position_lat, activity_records.position_long FROM activity_records WHERE activity_records.activity_id = (?) ORDER BY activity_records.timestamp DESC', (act_id,))
 
             # collect all points of this activity into a list
             this_points = []
@@ -252,10 +258,9 @@ def run_plotting(args):
                     this_points.append((this_lat, this_lon))
                     
                     if args.bounding_box is None:
-                        max_lat = max(this_lat, max_lat)
-                        min_lat = min(this_lat, min_lat)
-                        max_lon = max(this_lon, max_lon)
-                        min_lon = min(this_lon, min_lon)
+                        # store for determining bounding box from data
+                        all_lat.append(this_lat)
+                        all_lon.append(this_lon)
 
             # create a path from the points
             if len(this_points) > 1:
@@ -289,6 +294,17 @@ def run_plotting(args):
 
                 all_paths.append(path_points)
 
+    if args.bounding_box is None:
+        lat_array = np.array(all_lat)
+        lon_array = np.array(all_lon)
+        lat_quants = np.quantile(lat_array, (args.bb_percentile, 1.0-args.bb_percentile))
+        lon_quants = np.quantile(lon_array, (args.bb_percentile, 1.0-args.bb_percentile))
+
+        min_lat = lat_quants[0]
+        max_lat = lat_quants[1]
+        min_lon = lon_quants[0]
+        max_lon = lon_quants[1]
+
     db_conn.close()
 
     print('INFO: Total activity distance: {:.2f}km'.format(total_dist))
@@ -299,16 +315,36 @@ def run_plotting(args):
         zoom_level = ctx.tile._calculate_zoom(w=min_lon, s=min_lat, e=max_lon, n=max_lat)
         print('INFO: Using zoom level {}.'.format(zoom_level))
 
+    # from WGS84 to Spherical Mercator used by contextily
+    crs_trans = Transformer.from_crs('EPSG:4326', 'EPSG:3857', always_xy=True)  
+    
     # fetch the basemap including the specified bounding box region
     print('INFO: Fetching basemap...')
-    basemap_src = get_basemap_provider(args.basemap_provider)
-    basemap_img, imshow_extent = ctx.bounds2img(w=min_lon, s=min_lat, e=max_lon, n=max_lat, 
-                                                zoom=zoom_level, ll=True, source=basemap_src)
-    basemap_attr = basemap_src['attribution']
+    if args.basemap_provider is None:
+        # no map, but blank background
+        # transformer input: (x,y) -> (lon, lat)
+        min_point = crs_trans.transform(min_lon, min_lat)
+        max_point = crs_trans.transform(max_lon, max_lat)
+        imshow_extent = [min_point[0], max_point[0], min_point[1], max_point[1]]  #  [minX, maxX, minY, maxY] 
+
+        range_lon = max_point[0] - min_point[0]
+        range_lat = max_point[1] - min_point[1]
+
+        img_height = args.img_width
+        img_width = int(img_height / float(range_lat) * range_lon)
+
+        basemap_img = np.zeros((img_height, img_width, 3), dtype=np.uint8)
+        basemap_attr = None
+
+    else:
+        basemap_src = get_basemap_provider(args.basemap_provider)
+        basemap_img, imshow_extent = ctx.bounds2img(w=min_lon, s=min_lat, e=max_lon, n=max_lat, 
+                                                    zoom=zoom_level, ll=True, source=basemap_src)
+        basemap_attr = basemap_src['attribution']
 
     if args.track_colormap is None:
         # two default colormaps
-        if args.basemap_provider == 'CartoDB.DarkMatter':
+        if (args.basemap_provider is None) or (args.basemap_provider == 'CartoDB.DarkMatter'):
             track_cmap = 'plasma'  # ok with CartoDB.DarkMatter
         else:
             track_cmap = 'autumn'  # works ok with Esri.WorldImagery, use also for others
@@ -322,9 +358,7 @@ def run_plotting(args):
 
     # add attribution
     basemap_draw = ImageDraw.Draw(basemap_image)
-    basemap_draw.text((5, 5), 'Contextily basemap:\n{}'.format(basemap_attr))
-
-    crs_trans = Transformer.from_crs('EPSG:4326', 'EPSG:3857', always_xy=True)  # from WGS84 to Spherical Mercator used by contextily
+    basemap_draw.text((5, 5), 'Created with grrrmin_heatmap.py' + (basemap_attr is not None)*'\nUsing Contextily basemap:\n{}'.format(basemap_attr))
 
     # a function to transform geographical coordinates to PIL coordinates: (0,0) upper left corner. (x, y)
     def coord_to_pixel(lat, lon):
@@ -377,7 +411,6 @@ def run_plotting(args):
 
         if args.do_gif or (path_idx == n_paths - 1):
             comp_sum = np.log2(1.0 + 1.0*path_sum)
-            #comp_sum = np.power(path_sum, 0.25)
 
             # from a single float matrix to RGBA
             comp_rgba = matplotlib.cm.ScalarMappable(norm=None, cmap=track_cmap).to_rgba(comp_sum, alpha=None, bytes=True, norm=True)  # to uint8
@@ -449,6 +482,14 @@ def main(argv):
                            nargs=4,
                            help='output image bounding box in decimal WGS84: n, e, s, w') 
 
+    argparser.add_argument('--bb_percentile',
+                           action='store',
+                           type=float,
+                           default=0.01,
+                           help='when determining bounding box from data use percentiles '
+                                'bb_percentile and 1-bb_percentile. range: 0..1. to use '
+                                'min/max, set to 0') 
+
     argparser.add_argument('--zoom_level',
                            action='store',
                            type=int,
@@ -481,7 +522,13 @@ def main(argv):
                            action='store',
                            type=str,
                            default='CartoDB.DarkMatter',
-                           help='Contextily basemap provider string, e.g., "CartoDB.DarkMatter, Esri.WorldImagery"')
+                           help='Contextily basemap provider string, e.g., "CartoDB.DarkMatter, Esri.WorldImagery", "None" (for blank)')
+
+    argparser.add_argument('--img_width',
+                           action='store',
+                           type=int,
+                           default=1080,
+                           help='when not using a background map image width in pixels (height is computes from data)')
 
     argparser.add_argument('--track_colormap',
                            action='store',
@@ -494,6 +541,8 @@ def main(argv):
                            help='list basemap tile providers and exit')
 
     args = argparser.parse_args(argv)
+    if args.basemap_provider.lower() == 'None'.lower():
+        args.basemap_provider = None
 
     if args.list_providers:
         list_basemap_providers()
