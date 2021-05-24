@@ -3,8 +3,11 @@
 # 
 # grrrmin_heatmap.py
 #
-# Plot a heatmap of GPS routes saved into GarminDB <https://github.com/tcgoetz/GarminDB>
-# SQLite database.
+# Plot a heatmap of GPS routes 
+# - saved into GarminDB <https://github.com/tcgoetz/GarminDB> SQLite database,
+# or
+# - saved into .fit or .gpx (1.0, 1.1) files.
+#
 #
 # Usage examples:
 #  # all steps activities from year 2020, figure limited to north Nuremberg:
@@ -12,6 +15,10 @@
 #
 #  # all cycling activities from of all times using satellite image background:
 #  python grrrmin_heatmap.py --sport cycling --basemap_provider Esri.WorldImagery
+#
+#  # all activities in the given directory and all sub-directories
+#  python grrrmin_heatmap.py --input_dir ../activities/ --bounding_box 11.265 49.402 11.195 49.365
+#
 #
 # The real bounding box of the resulting map is guided by the given (or determined bounding box),
 # but in the end decided by the contextily library providing the map tiles.
@@ -53,6 +60,14 @@ import sys
 import sqlite3  # interface GarminDB
 import datetime
 
+from contextlib import closing  # context manager with automatic closing for the db
+from pathlib import Path  # home directory
+
+import os  # file name handling
+import glob  # listing files
+
+import argparse  # command line handling
+
 import numpy as np
 import matplotlib  # colormap
 
@@ -67,25 +82,230 @@ from tqdm import tqdm  # progress bar
 # plotting routines
 from PIL import Image, ImageDraw
 
-from pathlib import Path  # home directory
+import fitparse  # .fit file support
 
-import argparse  # command line handling
+import gpxpy  # .gpx file support
+import gpxpy.gpx
 
-__version__ = 0.22
-
-# default path to GarminDB database file
-garmin_db = '{}/HealthData/DBs/garmin_activities.db'.format(Path.home())
+__version__ = 0.3
 
 geod_conv = pyproj.Geod(ellps='WGS84')
 
-steps_template = 'SELECT activities.activity_id, activities.name, activities.description, activities.start_time, activities.stop_time, activities.elapsed_time, ROUND(activities.distance, 1) '\
-                 'FROM steps_activities JOIN activities ON activities.activity_id = steps_activities.activity_id {act_filter} ORDER BY activities.start_time ASC'
+                
+def get_activities_from_db(sport_name='steps', target_year=None, garmin_db=None):
+    """
+    Load requested activities from GarminDB SQLite database.
 
-cycle_query = 'SELECT activities.activity_id, activities.name, activities.description, activities.start_time, activities.stop_time, activities.elapsed_time, ROUND(activities.distance, 1) ' \
-              'FROM activities WHERE activities.sport == "cycling" OR activities.sport == "Biking" ORDER BY activities.start_time ASC'
+    Parameters
+    ----------
+    sport_name : string in {'cycling', 'all', 'running', 'hiking', 'steps'}
+        select a specific activity type
+    target_year : list of int, None, optional
+        specify a year from which the data should be plotted from
+    garmin_db : string, None, optional
+        alternative path to the SQLite DB
 
-all_activities_query = 'SELECT activities.activity_id, activities.name, activities.description, activities.start_time, activities.stop_time, activities.elapsed_time, ROUND(activities.distance, 1) ' \
-                       'FROM activities ORDER BY activities.start_time ASC'
+    Returns
+    -------
+    list of lists of points : activities
+    float : total distance in km
+    """
+    if garmin_db is None:
+        # default path to GarminDB database file
+        garmin_db = '{}/HealthData/DBs/garmin_activities.db'.format(Path.home())
+
+    steps_template = r'''SELECT activities.activity_id, activities.name, activities.description, activities.start_time,
+                         activities.stop_time, activities.elapsed_time, ROUND(activities.distance, 1) 
+                         FROM steps_activities 
+                         JOIN activities ON activities.activity_id = steps_activities.activity_id {act_filter} 
+                         ORDER BY activities.start_time ASC'''
+
+    cycle_query = r'''SELECT activities.activity_id, activities.name, activities.description, activities.start_time, 
+                      activities.stop_time, activities.elapsed_time, ROUND(activities.distance, 1)
+                      FROM activities 
+                      WHERE activities.sport == "cycling" 
+                      OR activities.sport == "Biking" 
+                      ORDER BY activities.start_time ASC'''
+
+    all_activities_query = r'''SELECT activities.activity_id, activities.name, activities.description, activities.start_time,
+                               activities.stop_time, activities.elapsed_time, ROUND(activities.distance, 1)
+                               FROM activities 
+                               ORDER BY activities.start_time ASC'''
+
+    if sport_name == 'cycling':
+        act_query = cycle_query
+        
+    elif sport_name == 'all':
+        act_query = all_activities_query
+
+    elif sport_name == 'running':
+        act_filter = 'WHERE Activities.sport == "running"'
+        act_query = steps_template.format(act_filter=act_filter)
+
+    elif sport_name == 'hiking':
+        act_filter = 'WHERE Activities.sport == "hiking"'
+        act_query = steps_template.format(act_filter=act_filter)
+
+    elif sport_name == 'walking':
+        act_filter = 'WHERE Activities.sport == "walking"'
+        act_query = steps_template.format(act_filter=act_filter)
+
+    else:  # sport_name == 'steps':
+        act_filter = ''
+        pic_tag = 'steps'
+        act_query = steps_template.format(act_filter=act_filter)
+
+    with closing(sqlite3.connect(garmin_db)) as db_conn:  # this closes the connection after finishing
+        c = db_conn.cursor()
+
+        # get all activities
+        act_id_list = []  # list to store activity_id keys
+        act_time_list = []
+        act_dist_list = []
+        c.execute(act_query)
+        for one_row in c:
+            act_id = one_row[0]
+            act_date = one_row[3]
+            act_dist = one_row[6]
+
+            act_id_list.append(act_id)
+            act_time_list.append(datetime.datetime.strptime(act_date, '%Y-%m-%d %H:%M:%S.%f'))
+            act_dist_list.append(act_dist)
+
+        # for each activity in the list, fetch the points
+        act_ite = tqdm(zip(act_id_list, act_time_list, act_dist_list), total=len(act_id_list))
+        act_ite.set_description('Activities...')
+        all_paths = []
+        total_dist = 0.0
+        for act_id, act_time, act_dist in act_ite:
+            # are we within the given time range
+            if (target_year is None) or (len(target_year) == 0) or (act_time.year in target_year):
+                total_dist += act_dist
+                c.execute('SELECT activity_records.activity_id, activity_records.timestamp, activity_records.position_lat, activity_records.position_long FROM activity_records WHERE activity_records.activity_id = (?) ORDER BY activity_records.timestamp DESC', (act_id,))
+
+                # collect all points of this activity into a list
+                this_points = []
+                for one_point in c:
+                    this_lat = one_point[2]
+                    this_lon = one_point[3]
+
+                    if (this_lat is not None) and (this_lon is not None):
+                        this_points.append((this_lat, this_lon))
+
+                all_paths.append(this_points)
+
+    return all_paths, total_dist
+    
+    
+def get_activities_from_dir(path_str, target_year=None):
+    """
+    Check recursively all files in the given directory and if they are
+    .fit or .gpx, load the activities from them. This may be somewhat slow.
+    
+    Parameters
+    ----------
+    path_str : string
+        path from which all the files are checked. run recursively into all subdirectories
+    target_year : list of int, None, optional
+        list of target years for filtering the plotted activities
+        
+    Returns
+    -------
+    list of lists of points : activities
+    float : total distance in km    
+    """
+    def semi2deg(x):
+        """
+        Convert "semicircle" units to decimal degrees.
+        """
+        return x * 180.0 / (2.0**31)
+
+    # list all files
+    all_files = glob.glob(os.path.join(path_str, '**/*.*'), recursive=True)
+    
+    # collected info
+    all_activities = []
+    total_dist = 0.0
+    for one_name in tqdm(all_files,
+                         total=len(all_files),
+                         desc='Checking files',
+                         unit=' files'):
+        full_name = os.path.join(path_str, one_name)
+        
+        # check for supported file extensions
+        base_str, ext_str = os.path.splitext(full_name)
+        if os.path.isfile(full_name) and (ext_str.lower() == '.fit'):
+            # try to parse the .fit file
+            try:
+                fitfile = fitparse.FitFile(full_name)
+                fitfile.parse()
+
+                this_act = []
+                act_dist = 0.0
+                act_time = None
+                # get all data messages that are of type record
+                for one_rec in fitfile.get_messages('record'):
+                    this_lat = one_rec.get_value('position_lat')
+                    this_lon = one_rec.get_value('position_long')
+                    this_dist = one_rec.get_value('distance')
+                    
+                    # convert the coordinates from the semicircle to decimal degrees
+                    if (this_lat is not None) and (this_lon is not None):
+                        this_act.append((semi2deg(this_lat), semi2deg(this_lon)))
+                    
+                    if this_dist is not None:
+                        act_dist = this_dist
+                    
+                    if act_time is None:
+                        this_time = one_rec.get_value('timestamp')
+                        if this_time is not None:
+                            act_time = this_time
+
+                # activity date -based filtering
+                if (act_time is None) or (target_year is None) or (len(target_year) == 0) or (act_time.year in target_year):
+                    all_activities.append(this_act)
+                    total_dist += act_dist
+                
+            except fitparse.FitParseError as e:
+                print('ERROR: Could not parse file "{}". Error: {}'.format(full_name, e))
+
+        elif os.path.isfile(full_name) and (ext_str.lower() == '.gpx'):
+            # try to parse the .gpx file
+            with open(full_name, 'r') as gpx_file:
+                gpx = gpxpy.parse(gpx_file)
+
+                act_dist = 0.0
+                act_time = None
+                this_act = []
+                for one_track in gpx.tracks:
+                    act_dist = one_track.length_3d()  # 3D length in meters
+                    act_time = one_track.get_time_bounds()[0]  # starting time
+                    
+                    for tmp_data in one_track.walk():
+                        one_point = tmp_data[0]
+                        this_act.append((one_point.latitude, one_point.longitude))
+
+                # activity date -based filtering
+                if (act_time is None) or (target_year is None) or (len(target_year) == 0) or (act_time.year in target_year):
+                    all_activities.append(this_act)
+                    total_dist += act_dist
+
+                act_dist = 0.0
+                act_time = None
+                this_act = []
+                for one_route in gpx.routes:
+                    act_dist = one_route.length_3d()
+                    act_time = one_track.get_time_bounds()[0]  # starting time
+                    for tmp_data in one_route.walk():
+                        one_point = tmp_data[0]
+                        this_act.append((one_point.latitude, one_point.longitude))
+
+                # activity date -based filtering
+                if (act_time is None) or (target_year is None) or (len(target_year) == 0) or (act_time.year in target_year):
+                    all_activities.append(this_act)
+                    total_dist += act_dist
+
+    return all_activities, total_dist / 1000.0
 
 
 def get_year_range(year_list):
@@ -196,104 +416,66 @@ def run_plotting(args):
     else:
         zoom_level = args.zoom_level
 
-    pic_tag = args.sport
-    if args.sport == 'cycling':
-        act_query = cycle_query
-        
-    elif args.sport == 'all':
-        act_query = all_activities_query
-
-    elif args.sport == 'running':
-        act_filter = 'WHERE Activities.sport == "running"'
-        act_query = steps_template.format(act_filter=act_filter)
-
-    elif args.sport == 'hiking':
-        act_filter = 'WHERE Activities.sport == "hiking"'
-        act_query = steps_template.format(act_filter=act_filter)
-
-    elif args.sport == 'walking':
-        act_filter = 'WHERE Activities.sport == "walking"'
-        act_query = steps_template.format(act_filter=act_filter)
-
-    else:  # args.sport == 'steps':
-        act_filter = ''
+    if (args.sport is None) or (args.sport.lower() not in {'cycling', 'all', 'running', 'walking'}):
         pic_tag = 'steps'
-        act_query = steps_template.format(act_filter=act_filter)
+    else:
+        pic_tag = args.sport
+    
+    if args.input_dir is not None:
+        all_activities, total_dist = get_activities_from_dir(args.input_dir, target_year=args.year)
+    else:
+        all_activities, total_dist = get_activities_from_db(sport_name=args.sport, target_year=args.year, garmin_db=None)
 
-    db_conn = sqlite3.connect(garmin_db)
-    c = db_conn.cursor()
-
-    # get all "steps" activities
-    act_id_list = []  # list to store activity_id keys
-    act_time_list = []
-    act_dist_list = []
-    c.execute(act_query)
-    for one_row in c:
-        act_id = one_row[0]
-        act_date = one_row[3]
-        act_dist = one_row[6]
-
-        act_id_list.append(act_id)
-        act_time_list.append(datetime.datetime.strptime(act_date, '%Y-%m-%d %H:%M:%S.%f'))
-        act_dist_list.append(act_dist)
-
-    # for each activity in the list, fetch the points
-    act_ite = tqdm(zip(act_id_list, act_time_list, act_dist_list), total=len(act_id_list))
-    act_ite.set_description('Activities...')
     all_paths = []
-    total_dist = 0.0
-    for act_id, act_time, act_dist in act_ite:
-        if (len(args.year) == 0) or (act_time.year in args.year):
-            total_dist += act_dist
-            c.execute('SELECT activity_records.activity_id, activity_records.timestamp, activity_records.position_lat, activity_records.position_long FROM activity_records WHERE activity_records.activity_id = (?) ORDER BY activity_records.timestamp DESC', (act_id,))
+    all_lat = []
+    all_lon = []
+    for act_idx, this_points in tqdm(enumerate(all_activities),
+                                     desc='Filtering points',
+                                     unit=' activities'):
+        # create a path from the points
+        if len(this_points) > 1:
+            path_points = []
 
-            # collect all points of this activity into a list
-            this_points = []
-            for one_point in c:
-                #print(one_point)
-                this_lat = one_point[2]
-                this_lon = one_point[3]
-
-                if (this_lat is not None) and (this_lon is not None):
-                    this_points.append((this_lat, this_lon))
-                    
+            # distance-based filtering
+            if args.max_point_dist is not None:
+                prev_point = (None, None)
+                for one_point in this_points:
                     if args.bounding_box is None:
-                        # store for determining bounding box from data
-                        all_lat.append(this_lat)
-                        all_lon.append(this_lon)
+                        all_lat.append(one_point[0])
+                        all_lon.append(one_point[1])
 
-            # create a path from the points
-            if len(this_points) > 1:
-                path_points = []
+                    if prev_point[0] is None:
+                        path_points.append(one_point)
 
-                # distance-based filtering
-                if args.max_point_dist is not None:
-                    prev_point = (None, None)
-                    for one_point in this_points:
-                        if prev_point[0] is None:
+                    else:
+                        # long/lat pairs to azimuths and distance in meters
+                        az1, az2, dist = geod_conv.inv(prev_point[1], prev_point[0], one_point[1], one_point[0])  
+
+                        if dist < args.max_point_dist:
                             path_points.append(one_point)
-
                         else:
-                            # long/lat pairs to azimuths and distance in meters
-                            az1, az2, dist = geod_conv.inv(prev_point[1], prev_point[0], one_point[1], one_point[0])  
+                            # too large distance between two points => discard
+                            print('WARNING: Track segment detached due to distance {:.1f}m exceeding the threshold of {:.1f}m.'.format(dist, args.max_point_dist))
+                            # start a new path
+                            all_paths.append(path_points)
+                            path_points = [one_point]
 
-                            if dist < args.max_point_dist:
-                                path_points.append(one_point)
-                            else:
-                                # too large distance between two points => discard
-                                print('WARNING: Track segment detached due to distance {:.1f}m exceeding the threshold of {:.1f}m.'.format(dist, args.max_point_dist))
-                                # start a new path
-                                all_paths.append(path_points)
-                                path_points = [one_point]
+                    prev_point = one_point
 
-                        prev_point = one_point
+            else:
+                # no distance filtering => use as-is
+                path_points = this_points.copy()
+                if args.bounding_box is None:
+                    for one_point in this_points:
+                        all_lat.append(one_point[0])
+                        all_lon.append(one_point[1])
 
-                else:
-                    # no distance filtering => use as-is
-                    path_points = this_points.copy()
+            all_paths.append(path_points)
 
-                all_paths.append(path_points)
-
+    if len(all_paths) == 0:
+        print('WARNING: No mathing activities found.')
+        sys.exit()
+            
     if args.bounding_box is None:
         lat_array = np.array(all_lat)
         lon_array = np.array(all_lon)
@@ -304,8 +486,6 @@ def run_plotting(args):
         max_lat = lat_quants[1]
         min_lon = lon_quants[0]
         max_lon = lon_quants[1]
-
-    db_conn.close()
 
     print('INFO: Total activity distance: {:.2f}km'.format(total_dist))
     print('INFO: Using lat range: {:.3f} - {:.3f}, and lon range: {:.3f} - {:.3f}.'.format(min_lat, max_lat, min_lon, max_lon))
@@ -390,7 +570,7 @@ def run_plotting(args):
     w = path_image.width
 
     # plot each path
-    plot_ite = tqdm(enumerate(all_paths), total=n_paths)
+    plot_ite = tqdm(enumerate(all_paths), total=n_paths, unit=' activities')
     plot_ite.set_description('Plotting...')
     year_str = get_year_range(args.year)
     out_name_base = 'grrrmin_heatmap_{}_{}'.format(pic_tag, year_str)
@@ -539,6 +719,12 @@ def main(argv):
     argparser.add_argument('--list_providers',
                            action='store_true',
                            help='list basemap tile providers and exit')
+
+    argparser.add_argument('--input_dir',
+                           action='store',
+                           type=str,
+                           default=None,
+                           help='directory-based data input: load all .fit and .gpx files here and in sub-directories')
 
     args = argparser.parse_args(argv)
     if args.basemap_provider.lower() == 'None'.lower():
