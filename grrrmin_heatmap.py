@@ -533,7 +533,6 @@ def run_plotting(args):
         track_cmap = args.track_colormap
 
     # from RGB to RGBA
-    print(basemap_img.dtype, basemap_img.shape)
     zero_alpha = 255 * np.ones((basemap_img.shape[0], basemap_img.shape[1], 1), dtype=np.uint8)
     if basemap_img.shape[2] == 3:
         # add alpha channel
