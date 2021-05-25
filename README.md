@@ -1,6 +1,6 @@
 # grrrmin_heatmap.py
 
-A python script for creating a static heatmap-like visualization in PNG-format from activity location records stored into a [GarminDB](https://github.com/tcgoetz/GarminDB), or plain FIT or GPX files (experimental support).
+A python script for creating a static heatmap-like visualization in PNG-format from activity location records stored into a [GarminDB](https://github.com/tcgoetz/GarminDB), or plain FIT, GPX, or TCX files (experimental support).
 
 The main difference from a point-based heatmap is that in this visualization the line segments formed between each two points are considered in the sums. The main difference from [dérive](https://github.com/erik/derive) is (in addition to the use of Python) that the more crowded points do not only get more opaque, but also the color is changing.
 
