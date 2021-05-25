@@ -6,7 +6,7 @@
 # Plot a heatmap of GPS routes 
 # - saved into GarminDB <https://github.com/tcgoetz/GarminDB> SQLite database,
 # or
-# - saved into .fit or .gpx (1.0, 1.1) files.
+# - saved into .fit, .gpx (1.0, 1.1), .tcx files.
 #
 #
 # Usage examples:
@@ -60,6 +60,8 @@ import sys
 import sqlite3  # interface GarminDB
 import datetime
 
+import dateutil  # tcx time zone parsing
+
 from contextlib import closing  # context manager with automatic closing for the db
 from pathlib import Path  # home directory
 
@@ -87,7 +89,9 @@ import fitparse  # .fit file support
 import gpxpy  # .gpx file support
 import gpxpy.gpx
 
-__version__ = 0.3
+import tcxparser  # .tcx file support
+
+__version__ = '0.3.1'
 
 geod_conv = pyproj.Geod(ellps='WGS84')
 
@@ -200,7 +204,7 @@ def get_activities_from_db(sport_name='steps', target_year=None, garmin_db=None)
 def get_activities_from_dir(path_str, target_year=None):
     """
     Check recursively all files in the given directory and if they are
-    .fit or .gpx, load the activities from them. This may be somewhat slow.
+    .fit/.gpx/.tcx, load the activities from them. This may be somewhat slow.
     
     Parameters
     ----------
@@ -240,6 +244,11 @@ def get_activities_from_dir(path_str, target_year=None):
                 fitfile = fitparse.FitFile(full_name)
                 fitfile.parse()
 
+                # retieve activity type, even though this is not used right now
+                this_activity_type = None
+                for sports in fitfile.get_messages('sport'):
+                    this_activity_type = sports.get_value('sport')
+                
                 this_act = []
                 act_dist = 0.0
                 act_time = None
@@ -304,6 +313,22 @@ def get_activities_from_dir(path_str, target_year=None):
                 if (act_time is None) or (target_year is None) or (len(target_year) == 0) or (act_time.year in target_year):
                     all_activities.append(this_act)
                     total_dist += act_dist
+
+        elif os.path.isfile(full_name) and (ext_str.lower() == '.tcx'):
+            # try to parse the .tcx file
+            tcx_data = tcxparser.TCXParser(full_name)
+
+            this_activity_type = tcx_data.activity_type  # could be used for filtering activity type, but not done now
+            
+            act_dist = tcx_data.distance
+            act_time = dateutil.parser.isoparse(tcx_data.started_at)
+            print(act_time)
+            this_act = tcx_data.position_values()  # list of (lat, lon) tuples
+
+            # activity date -based filtering
+            if (act_time is None) or (target_year is None) or (len(target_year) == 0) or (act_time.year in target_year):
+                all_activities.append(this_act)
+                total_dist += act_dist
 
     return all_activities, total_dist / 1000.0
 
