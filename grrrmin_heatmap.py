@@ -742,7 +742,7 @@ def main(argv):
                            action='store',
                            type=float,
                            default=500.0,
-                           help='only track starting within this radius (in meters) from "start_center" are plotted')
+                           help='only tracks starting within this radius (in meters) from "start_center" are plotted')
 
     argparser.add_argument('--bb_percentile',
                            action='store',
@@ -790,7 +790,7 @@ def main(argv):
                            action='store',
                            type=int,
                            default=1080,
-                           help='when not using a background map image width in pixels (height is computes from data)')
+                           help='when not using a background map image width in pixels (height is computed from data)')
 
     argparser.add_argument('--track_colormap',
                            action='store',
