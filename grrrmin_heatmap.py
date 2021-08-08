@@ -1,9 +1,9 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
-# 
+#
 # grrrmin_heatmap.py
 #
-# Plot a heatmap of GPS routes 
+# Plot a heatmap of GPS routes
 # - saved into GarminDB <https://github.com/tcgoetz/GarminDB> SQLite database,
 # or
 # - saved into .fit, .gpx (1.0, 1.1), .tcx files.
@@ -12,6 +12,9 @@
 # Usage examples:
 #  # all steps activities from year 2020, figure limited to north Nuremberg:
 #  python grrrmin_heatmap.py --bounding_box 11.16 49.524 11.015 49.452 --year 2020 --zoom_level 15 --sport steps
+#
+#  # steps activities from all time, figure centered in Feucht:
+#  python grrrmin_heatmap.py --sport steps --zoom_level 15 --start_center 49.383 11.2185 --start_max_dist 100.0 --bb_percentile 0.0
 #
 #  # all cycling activities from of all times using satellite image background:
 #  python grrrmin_heatmap.py --sport cycling --basemap_provider Esri.WorldImagery
@@ -30,29 +33,29 @@
 #
 # Copyright 2020-2021 Jouni Paulus
 #
-# Redistribution and use in source and binary forms, with or without modification, 
+# Redistribution and use in source and binary forms, with or without modification,
 # are permitted provided that the following conditions are met:
 #
-# 1. Redistributions of source code must retain the above copyright notice, this 
+# 1. Redistributions of source code must retain the above copyright notice, this
 # list of conditions and the following disclaimer.
 #
-# 2. Redistributions in binary form must reproduce the above copyright notice, 
-# this list of conditions and the following disclaimer in the documentation and/or 
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+# this list of conditions and the following disclaimer in the documentation and/or
 # other materials provided with the distribution.
 #
-# 3. Neither the name of the copyright holder nor the names of its contributors 
-# may be used to endorse or promote products derived from this software without 
+# 3. Neither the name of the copyright holder nor the names of its contributors
+# may be used to endorse or promote products derived from this software without
 # specific prior written permission.
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 # AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
 # WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-# IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, 
-# INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, 
+# IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+# INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
 # BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
 # OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
@@ -91,12 +94,12 @@ import gpxpy.gpx
 
 import tcxparser  # .tcx file support
 
-__version__ = '0.3.1'
+__version__ = '0.3.2'
 
 geod_conv = pyproj.Geod(ellps='WGS84')
 
-                
-def get_activities_from_db(sport_name='steps', target_year=None, garmin_db=None):
+
+def get_activities_from_db(sport_name='steps', target_year=None, garmin_db=None, verbosity=1):
     """
     Load requested activities from GarminDB SQLite database.
 
@@ -108,6 +111,8 @@ def get_activities_from_db(sport_name='steps', target_year=None, garmin_db=None)
         specify a year from which the data should be plotted from
     garmin_db : string, None, optional
         alternative path to the SQLite DB
+    verbosity : int, optional
+        printout verbosity
 
     Returns
     -------
@@ -119,26 +124,26 @@ def get_activities_from_db(sport_name='steps', target_year=None, garmin_db=None)
         garmin_db = '{}/HealthData/DBs/garmin_activities.db'.format(Path.home())
 
     steps_template = r'''SELECT activities.activity_id, activities.name, activities.description, activities.start_time,
-                         activities.stop_time, activities.elapsed_time, ROUND(activities.distance, 1) 
-                         FROM steps_activities 
-                         JOIN activities ON activities.activity_id = steps_activities.activity_id {act_filter} 
+                         activities.stop_time, activities.elapsed_time, ROUND(activities.distance, 1)
+                         FROM steps_activities
+                         JOIN activities ON activities.activity_id = steps_activities.activity_id {act_filter}
                          ORDER BY activities.start_time ASC'''
 
-    cycle_query = r'''SELECT activities.activity_id, activities.name, activities.description, activities.start_time, 
+    cycle_query = r'''SELECT activities.activity_id, activities.name, activities.description, activities.start_time,
                       activities.stop_time, activities.elapsed_time, ROUND(activities.distance, 1)
-                      FROM activities 
-                      WHERE activities.sport == "cycling" 
-                      OR activities.sport == "Biking" 
+                      FROM activities
+                      WHERE activities.sport == "cycling"
+                      OR activities.sport == "Biking"
                       ORDER BY activities.start_time ASC'''
 
     all_activities_query = r'''SELECT activities.activity_id, activities.name, activities.description, activities.start_time,
                                activities.stop_time, activities.elapsed_time, ROUND(activities.distance, 1)
-                               FROM activities 
+                               FROM activities
                                ORDER BY activities.start_time ASC'''
 
     if sport_name == 'cycling':
         act_query = cycle_query
-        
+
     elif sport_name == 'all':
         act_query = all_activities_query
 
@@ -177,7 +182,7 @@ def get_activities_from_db(sport_name='steps', target_year=None, garmin_db=None)
             act_dist_list.append(act_dist)
 
         # for each activity in the list, fetch the points
-        act_ite = tqdm(zip(act_id_list, act_time_list, act_dist_list), total=len(act_id_list))
+        act_ite = tqdm(zip(act_id_list, act_time_list, act_dist_list), total=len(act_id_list), disable=(verbosity == 0))
         act_ite.set_description('Activities...')
         all_paths = []
         total_dist = 0.0
@@ -199,24 +204,26 @@ def get_activities_from_db(sport_name='steps', target_year=None, garmin_db=None)
                 all_paths.append(this_points)
 
     return all_paths, total_dist
-    
-    
-def get_activities_from_dir(path_str, target_year=None):
+
+
+def get_activities_from_dir(path_str, target_year=None, verbosity=1):
     """
     Check recursively all files in the given directory and if they are
     .fit/.gpx/.tcx, load the activities from them. This may be somewhat slow.
-    
+
     Parameters
     ----------
     path_str : string
         path from which all the files are checked. run recursively into all subdirectories
     target_year : list of int, None, optional
         list of target years for filtering the plotted activities
-        
+    verbosity : int, optional
+        printout verbosity
+
     Returns
     -------
     list of lists of points : activities
-    float : total distance in km    
+    float : total distance in km
     """
     def semi2deg(x):
         """
@@ -226,16 +233,17 @@ def get_activities_from_dir(path_str, target_year=None):
 
     # list all files
     all_files = glob.glob(os.path.join(path_str, '**/*.*'), recursive=True)
-    
+
     # collected info
     all_activities = []
     total_dist = 0.0
     for one_name in tqdm(all_files,
                          total=len(all_files),
                          desc='Checking files',
-                         unit=' files'):
+                         unit=' files',
+                         disable=(verbosity == 0)):
         full_name = os.path.join(path_str, one_name)
-        
+
         # check for supported file extensions
         base_str, ext_str = os.path.splitext(full_name)
         if os.path.isfile(full_name) and (ext_str.lower() == '.fit'):
@@ -248,7 +256,7 @@ def get_activities_from_dir(path_str, target_year=None):
                 this_activity_type = None
                 for sports in fitfile.get_messages('sport'):
                     this_activity_type = sports.get_value('sport')
-                
+
                 this_act = []
                 act_dist = 0.0
                 act_time = None
@@ -257,14 +265,14 @@ def get_activities_from_dir(path_str, target_year=None):
                     this_lat = one_rec.get_value('position_lat')
                     this_lon = one_rec.get_value('position_long')
                     this_dist = one_rec.get_value('distance')
-                    
+
                     # convert the coordinates from the semicircle to decimal degrees
                     if (this_lat is not None) and (this_lon is not None):
                         this_act.append((semi2deg(this_lat), semi2deg(this_lon)))
-                    
+
                     if this_dist is not None:
                         act_dist = this_dist
-                    
+
                     if act_time is None:
                         this_time = one_rec.get_value('timestamp')
                         if this_time is not None:
@@ -274,9 +282,10 @@ def get_activities_from_dir(path_str, target_year=None):
                 if (act_time is None) or (target_year is None) or (len(target_year) == 0) or (act_time.year in target_year):
                     all_activities.append(this_act)
                     total_dist += act_dist
-                
+
             except fitparse.FitParseError as e:
-                print('ERROR: Could not parse file "{}". Error: {}'.format(full_name, e))
+                if verbosity > 0:
+                    print('ERROR: Could not parse file "{}". Error: {}'.format(full_name, e))
 
         elif os.path.isfile(full_name) and (ext_str.lower() == '.gpx'):
             # try to parse the .gpx file
@@ -289,7 +298,7 @@ def get_activities_from_dir(path_str, target_year=None):
                 for one_track in gpx.tracks:
                     act_dist = one_track.length_3d()  # 3D length in meters
                     act_time = one_track.get_time_bounds()[0]  # starting time
-                    
+
                     for tmp_data in one_track.walk():
                         one_point = tmp_data[0]
                         this_act.append((one_point.latitude, one_point.longitude))
@@ -319,10 +328,9 @@ def get_activities_from_dir(path_str, target_year=None):
             tcx_data = tcxparser.TCXParser(full_name)
 
             this_activity_type = tcx_data.activity_type  # could be used for filtering activity type, but not done now
-            
+
             act_dist = tcx_data.distance
             act_time = dateutil.parser.isoparse(tcx_data.started_at)
-            print(act_time)
             this_act = tcx_data.position_values()  # list of (lat, lon) tuples
 
             # activity date -based filtering
@@ -344,7 +352,7 @@ def get_year_range(year_list):
     Parameters
     ----------
     year_list : list of int
-    
+
     Returns
     -------
     string
@@ -377,10 +385,9 @@ def get_year_range(year_list):
 def get_basemap_provider(provider_str):
     """
     Take a string representing the desired Contextily basemap provider,
-    e.g., "Esri.WorldImagery", parse it, and provide the provider 
+    e.g., "Esri.WorldImagery", parse it, and provide the provider
     instance contextily.providers.Esri.WorldImagery, if found.
-
-    """    
+    """
     provider_parts = provider_str.split('.')
 
     b_provider = None
@@ -396,16 +403,17 @@ def get_basemap_provider(provider_str):
     return b_provider
 
 
-# main plotting function
 def run_plotting(args):
     """
+    Main plotting function
+
     Parameters
     ----------
-    args : Namespace with field fields: 
+    args : Namespace with field fields:
         bounding_box : None, 4-list/tuple of floats
             define image bounding box in decimal WGS84: n, e, s, w. None for automatic
         bb_percentile : float
-            in range 0..1, when determining the bounding box from the data, use bb_percentile 
+            in range 0..1, when determining the bounding box from the data, use bb_percentile
             and 1-bb_percentile quantiles as the limits to filter outliers. 0 for min/max
         zoom_level: None, int
             None for automatic zoom level, otherwise the given int
@@ -418,7 +426,7 @@ def run_plotting(args):
         track_colormap : string
             matplotlib colormap name
         max_point_dist : float, None
-            if not None and consecutive track points are further than 
+            if not None and consecutive track points are further than
             this, the track is split into two
         year : list of ints
             list of years to plot, e.g., [2019, 2020]
@@ -426,8 +434,15 @@ def run_plotting(args):
             if True, create a frame-per-activity animation
         fps : float
             FPS of the created animation
-
+        start_center : None, 2-tuple of float
+            only tracks starting near ("start_max_dist") this point (lat, lon, in decimal WGS84) are plotted
+        start_max_dist : float
+            only track starting within this radius (in meters) from "start_center" are plotted
+        verbosity : int
+            progree printout verbosity level
     """
+    do_start_filter = (args.start_center is not None) and (args.start_max_dist is not None)
+
     if args.bounding_box is not None:  # n, e, s, w
         max_lon, max_lat, min_lon, min_lat = args.bounding_box
 
@@ -445,18 +460,19 @@ def run_plotting(args):
         pic_tag = 'steps'
     else:
         pic_tag = args.sport
-    
+
     if args.input_dir is not None:
-        all_activities, total_dist = get_activities_from_dir(args.input_dir, target_year=args.year)
+        all_activities, total_dist = get_activities_from_dir(args.input_dir, target_year=args.year, verbosity=args.verbosity)
     else:
-        all_activities, total_dist = get_activities_from_db(sport_name=args.sport, target_year=args.year, garmin_db=None)
+        all_activities, total_dist = get_activities_from_db(sport_name=args.sport, target_year=args.year, garmin_db=None, verbosity=args.verbosity)
 
     all_paths = []
     all_lat = []
     all_lon = []
     for act_idx, this_points in tqdm(enumerate(all_activities),
                                      desc='Filtering points',
-                                     unit=' activities'):
+                                     unit=' activities',
+                                     disable=(args.verbosity == 0)):
         # create a path from the points
         if len(this_points) > 1:
             path_points = []
@@ -464,7 +480,18 @@ def run_plotting(args):
             # distance-based filtering
             if args.max_point_dist is not None:
                 prev_point = (None, None)
-                for one_point in this_points:
+                for point_idx, one_point in enumerate(this_points):
+                    if do_start_filter and (point_idx == 0):
+                        # starting point -based filtering active and first point in activity
+                        start_az1, start_az2, start_dist = geod_conv.inv(args.start_center[1], args.start_center[0],
+                                                                         one_point[1], one_point[0])
+                        if start_dist > args.start_max_dist:
+                            # too far from the target starting location => skip the entire activity
+                            if args.verbosity > 1:
+                                print('WARNING: Activity starting location {:.1f} m (>{:.1f} m) from the defined start location, skipping.'.format(start_dist,
+                                                                                                                                                   args.start_max_dist))
+                            break
+
                     if args.bounding_box is None:
                         all_lat.append(one_point[0])
                         all_lon.append(one_point[1])
@@ -474,13 +501,15 @@ def run_plotting(args):
 
                     else:
                         # long/lat pairs to azimuths and distance in meters
-                        az1, az2, dist = geod_conv.inv(prev_point[1], prev_point[0], one_point[1], one_point[0])  
+                        az1, az2, dist = geod_conv.inv(prev_point[1], prev_point[0], one_point[1], one_point[0])
 
                         if dist < args.max_point_dist:
                             path_points.append(one_point)
                         else:
                             # too large distance between two points => discard
-                            print('WARNING: Track segment detached due to distance {:.1f}m exceeding the threshold of {:.1f}m.'.format(dist, args.max_point_dist))
+                            if args.verbosity > 1:
+                                print('WARNING: Track segment detached due to distance {:.1f}m exceeding the threshold of {:.1f}m.'.format(dist, args.max_point_dist))
+
                             # start a new path
                             all_paths.append(path_points)
                             path_points = [one_point]
@@ -498,9 +527,11 @@ def run_plotting(args):
             all_paths.append(path_points)
 
     if len(all_paths) == 0:
-        print('WARNING: No mathing activities found.')
+        if args.verbosity > 0:
+            print('WARNING: No mathing activities found.')
+
         sys.exit()
-            
+
     if args.bounding_box is None:
         lat_array = np.array(all_lat)
         lon_array = np.array(all_lon)
@@ -512,25 +543,29 @@ def run_plotting(args):
         min_lon = lon_quants[0]
         max_lon = lon_quants[1]
 
-    print('INFO: Total activity distance: {:.2f}km'.format(total_dist))
-    print('INFO: Using lat range: {:.3f} - {:.3f}, and lon range: {:.3f} - {:.3f}.'.format(min_lat, max_lat, min_lon, max_lon))
+    if args.verbosity > 0:
+        print('INFO: Total activity distance: {:.2f}km'.format(total_dist))
+        print('INFO: Using lat range: {:.3f} - {:.3f}, and lon range: {:.3f} - {:.3f}.'.format(min_lat, max_lat, min_lon, max_lon))
 
     if zoom_level == 'auto':
         # the default zoom level
         zoom_level = ctx.tile._calculate_zoom(w=min_lon, s=min_lat, e=max_lon, n=max_lat)
-        print('INFO: Using zoom level {}.'.format(zoom_level))
+        if args.verbosity > 1:
+            print('INFO: Using zoom level {}.'.format(zoom_level))
 
     # from WGS84 to Spherical Mercator used by contextily
-    crs_trans = Transformer.from_crs('EPSG:4326', 'EPSG:3857', always_xy=True)  
-    
+    crs_trans = Transformer.from_crs('EPSG:4326', 'EPSG:3857', always_xy=True)
+
     # fetch the basemap including the specified bounding box region
-    print('INFO: Fetching basemap...')
+    if args.verbosity > 0:
+        print('INFO: Fetching basemap...')
+
     if args.basemap_provider is None:
         # no map, but blank background
         # transformer input: (x,y) -> (lon, lat)
         min_point = crs_trans.transform(min_lon, min_lat)
         max_point = crs_trans.transform(max_lon, max_lat)
-        imshow_extent = [min_point[0], max_point[0], min_point[1], max_point[1]]  #  [minX, maxX, minY, maxY] 
+        imshow_extent = [min_point[0], max_point[0], min_point[1], max_point[1]]  #  [minX, maxX, minY, maxY]
 
         range_lon = max_point[0] - min_point[0]
         range_lat = max_point[1] - min_point[1]
@@ -543,7 +578,7 @@ def run_plotting(args):
 
     else:
         basemap_src = get_basemap_provider(args.basemap_provider)
-        basemap_img, imshow_extent = ctx.bounds2img(w=min_lon, s=min_lat, e=max_lon, n=max_lat, 
+        basemap_img, imshow_extent = ctx.bounds2img(w=min_lon, s=min_lat, e=max_lon, n=max_lat,
                                                     zoom=zoom_level, ll=True, source=basemap_src)
         basemap_attr = basemap_src['attribution']
 
@@ -601,7 +636,7 @@ def run_plotting(args):
     w = path_image.width
 
     # plot each path
-    plot_ite = tqdm(enumerate(all_paths), total=n_paths, unit=' activities')
+    plot_ite = tqdm(enumerate(all_paths), total=n_paths, unit=' activities', disable=(args.verbosity == 0))
     plot_ite.set_description('Plotting...')
     year_str = get_year_range(args.year)
     out_name_base = 'grrrmin_heatmap_{}_{}'.format(pic_tag, year_str)
@@ -641,8 +676,11 @@ def run_plotting(args):
                 out_image.save(out_file_name)
 
     if args.do_gif:
-        all_frames[0].save('{}.gif'.format(out_name_base), save_all=True, append_images=all_frames[1:], 
-                        loop=False, duration=1.0 / args.fps)
+        all_frames[0].save('{}.gif'.format(out_name_base),
+                           save_all=True,
+                           append_images=all_frames[1:],
+                           loop=False,
+                           duration=1.0 / args.fps)
 
 
 ##
@@ -691,7 +729,20 @@ def main(argv):
                            type=float,
                            default=None,
                            nargs=4,
-                           help='output image bounding box in decimal WGS84: n, e, s, w') 
+                           help='output image bounding box in decimal WGS84: n, e, s, w')
+
+    argparser.add_argument('--start_center',
+                           action='store',
+                           type=float,
+                           default=None,
+                           nargs=2,
+                           help='only tracks starting near ("start_max_dist") this point (lat, lon, in decimal WGS84) are plotted')
+
+    argparser.add_argument('--start_max_dist',
+                           action='store',
+                           type=float,
+                           default=500.0,
+                           help='only track starting within this radius (in meters) from "start_center" are plotted')
 
     argparser.add_argument('--bb_percentile',
                            action='store',
@@ -699,7 +750,7 @@ def main(argv):
                            default=0.01,
                            help='when determining bounding box from data use percentiles '
                                 'bb_percentile and 1-bb_percentile. range: 0..1. to use '
-                                'min/max, set to 0') 
+                                'min/max, set to 0')
 
     argparser.add_argument('--zoom_level',
                            action='store',
@@ -756,6 +807,12 @@ def main(argv):
                            type=str,
                            default=None,
                            help='directory-based data input: load all .fit and .gpx files here and in sub-directories')
+
+    argparser.add_argument('--verbosity',
+                           action='store',
+                           type=int,
+                           default=1,
+                           help='message output verbosity. 0: silent, 1: default, 2: more info')
 
     args = argparser.parse_args(argv)
     if args.basemap_provider.lower() == 'None'.lower():
