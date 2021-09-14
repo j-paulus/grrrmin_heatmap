@@ -94,7 +94,7 @@ import gpxpy.gpx
 
 import tcxparser  # .tcx file support
 
-__version__ = '0.3.2'
+__version__ = '0.3.3'
 
 geod_conv = pyproj.Geod(ellps='WGS84')
 
@@ -190,7 +190,7 @@ def get_activities_from_db(sport_name='steps', target_year=None, garmin_db=None,
             # are we within the given time range
             if (target_year is None) or (len(target_year) == 0) or (act_time.year in target_year):
                 total_dist += act_dist
-                c.execute('SELECT activity_records.activity_id, activity_records.timestamp, activity_records.position_lat, activity_records.position_long FROM activity_records WHERE activity_records.activity_id = (?) ORDER BY activity_records.timestamp DESC', (act_id,))
+                c.execute('SELECT activity_records.activity_id, activity_records.timestamp, activity_records.position_lat, activity_records.position_long FROM activity_records WHERE activity_records.activity_id = (?) ORDER BY activity_records.timestamp ASC', (act_id,))
 
                 # collect all points of this activity into a list
                 this_points = []
@@ -477,21 +477,22 @@ def run_plotting(args):
         if len(this_points) > 1:
             path_points = []
 
+            # starting point -based filtering active and first point in activity
+            if do_start_filter:
+                one_point = this_points[0]
+                start_az1, start_az2, start_dist = geod_conv.inv(args.start_center[1], args.start_center[0],
+                                                                 one_point[1], one_point[0])
+                if start_dist > args.start_max_dist:
+                    # too far from the target starting location => skip the entire activity
+                    if args.verbosity > 1:
+                        print('WARNING: Activity starting location {:.1f} m (>{:.1f} m) from the defined start location, skipping.'.format(start_dist,
+                                                                                                                                            args.start_max_dist))
+                    continue  # skip to next activity
+
             # distance-based filtering
             if args.max_point_dist is not None:
                 prev_point = (None, None)
                 for point_idx, one_point in enumerate(this_points):
-                    if do_start_filter and (point_idx == 0):
-                        # starting point -based filtering active and first point in activity
-                        start_az1, start_az2, start_dist = geod_conv.inv(args.start_center[1], args.start_center[0],
-                                                                         one_point[1], one_point[0])
-                        if start_dist > args.start_max_dist:
-                            # too far from the target starting location => skip the entire activity
-                            if args.verbosity > 1:
-                                print('WARNING: Activity starting location {:.1f} m (>{:.1f} m) from the defined start location, skipping.'.format(start_dist,
-                                                                                                                                                   args.start_max_dist))
-                            break
-
                     if args.bounding_box is None:
                         all_lat.append(one_point[0])
                         all_lon.append(one_point[1])
