@@ -94,7 +94,7 @@ import gpxpy.gpx
 
 import tcxparser  # .tcx file support
 
-__version__ = '0.3.3'
+__version__ = '0.3.4'
 
 geod_conv = pyproj.Geod(ellps='WGS84')
 
@@ -190,7 +190,7 @@ def get_activities_from_db(sport_name='steps', target_year=None, garmin_db=None,
             # are we within the given time range
             if (target_year is None) or (len(target_year) == 0) or (act_time.year in target_year):
                 total_dist += act_dist
-                c.execute('SELECT activity_records.activity_id, activity_records.timestamp, activity_records.position_lat, activity_records.position_long FROM activity_records WHERE activity_records.activity_id = (?) ORDER BY activity_records.timestamp ASC', (act_id,))
+                c.execute('SELECT activity_records.activity_id, activity_records.timestamp, activity_records.position_lat, activity_records.position_long, activity_records.altitude FROM activity_records WHERE activity_records.activity_id = (?) ORDER BY activity_records.timestamp ASC', (act_id,))
 
                 # collect all points of this activity into a list
                 this_points = []
@@ -222,7 +222,7 @@ def get_activities_from_dir(path_str, target_year=None, verbosity=1):
 
     Returns
     -------
-    list of lists of points : activities
+    list of lists of points : activities (lat, lon, alt): lat/lon in decimal WSG84 degrees, alt in meters
     float : total distance in km
     """
     def semi2deg(x):
@@ -265,10 +265,11 @@ def get_activities_from_dir(path_str, target_year=None, verbosity=1):
                     this_lat = one_rec.get_value('position_lat')
                     this_lon = one_rec.get_value('position_long')
                     this_dist = one_rec.get_value('distance')
+                    this_altitude = one_rec.get_value('altitude')
 
                     # convert the coordinates from the semicircle to decimal degrees
                     if (this_lat is not None) and (this_lon is not None):
-                        this_act.append((semi2deg(this_lat), semi2deg(this_lon)))
+                        this_act.append((semi2deg(this_lat), semi2deg(this_lon)), this_altitude)
 
                     if this_dist is not None:
                         act_dist = this_dist
@@ -301,7 +302,7 @@ def get_activities_from_dir(path_str, target_year=None, verbosity=1):
 
                     for tmp_data in one_track.walk():
                         one_point = tmp_data[0]
-                        this_act.append((one_point.latitude, one_point.longitude))
+                        this_act.append((one_point.latitude, one_point.longitude, one_point.elevation))
 
                 # activity date -based filtering
                 if (act_time is None) or (target_year is None) or (len(target_year) == 0) or (act_time.year in target_year):
@@ -316,7 +317,7 @@ def get_activities_from_dir(path_str, target_year=None, verbosity=1):
                     act_time = one_track.get_time_bounds()[0]  # starting time
                     for tmp_data in one_route.walk():
                         one_point = tmp_data[0]
-                        this_act.append((one_point.latitude, one_point.longitude))
+                        this_act.append((one_point.latitude, one_point.longitude, one_point.elevation))
 
                 # activity date -based filtering
                 if (act_time is None) or (target_year is None) or (len(target_year) == 0) or (act_time.year in target_year):
@@ -332,10 +333,16 @@ def get_activities_from_dir(path_str, target_year=None, verbosity=1):
             act_dist = tcx_data.distance
             act_time = dateutil.parser.isoparse(tcx_data.started_at)
             this_act = tcx_data.position_values()  # list of (lat, lon) tuples
+            this_altitudes = tcx_data.altitude_points()  # list of floats
+            if len(this_act) == len(this_altitudes):
+                this_act_w_alt = [one_act + (one_alt,) for one_act, one_alt in zip(this_act, this_altitudes)]
+            else:
+                # if the two lists have different lengths, trust on location
+                this_act_w_alt = [one_act + (None,) for one_act in this_act]
 
             # activity date -based filtering
             if (act_time is None) or (target_year is None) or (len(target_year) == 0) or (act_time.year in target_year):
-                all_activities.append(this_act)
+                all_activities.append(this_act_w_alt)
                 total_dist += act_dist
 
     return all_activities, total_dist / 1000.0
@@ -785,7 +792,7 @@ def main(argv):
                            action='store',
                            type=str,
                            default='CartoDB.DarkMatter',
-                           help='Contextily basemap provider string, e.g., "CartoDB.DarkMatter, Esri.WorldImagery", "None" (for blank)')
+                           help='Contextily basemap provider string, e.g., "OpenTopoMap", "HikeBike.HikeBike", "CartoDB.DarkMatter, Esri.WorldImagery", "None" (for blank)')
 
     argparser.add_argument('--img_width',
                            action='store',
