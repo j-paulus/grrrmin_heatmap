@@ -73,6 +73,8 @@ import glob  # listing files
 
 import argparse  # command line handling
 
+from typing import Optional, Tuple, List, Any
+
 import numpy as np
 import matplotlib  # colormap
 
@@ -94,12 +96,14 @@ import gpxpy.gpx
 
 import tcxparser  # .tcx file support
 
-__version__ = '0.3.4'
+__version__ = '0.3.5'
 
 geod_conv = pyproj.Geod(ellps='WGS84')
 
 
-def get_activities_from_db(sport_name='steps', target_year=None, garmin_db=None, verbosity=1):
+def get_activities_from_db(sport_name: str='steps', target_year: Optional[int]=None,
+                           garmin_db: Optional[str]=None, verbosity: int=1) \
+                           -> Tuple[List[List[Tuple[float, float]]], float]:
     """
     Load requested activities from GarminDB SQLite database.
 
@@ -206,7 +210,8 @@ def get_activities_from_db(sport_name='steps', target_year=None, garmin_db=None,
     return all_paths, total_dist
 
 
-def get_activities_from_dir(path_str, target_year=None, verbosity=1):
+def get_activities_from_dir(path_str: str, target_year: Optional[int]=None, verbosity: int=1) \
+                            -> Tuple[List[List[Tuple[float, float, float]]], float]:
     """
     Check recursively all files in the given directory and if they are
     .fit/.gpx/.tcx, load the activities from them. This may be somewhat slow.
@@ -225,7 +230,7 @@ def get_activities_from_dir(path_str, target_year=None, verbosity=1):
     list of lists of points : activities (lat, lon, alt): lat/lon in decimal WSG84 degrees, alt in meters
     float : total distance in km
     """
-    def semi2deg(x):
+    def semi2deg(x: float) -> float:
         """
         Convert "semicircle" units to decimal degrees.
         """
@@ -348,7 +353,7 @@ def get_activities_from_dir(path_str, target_year=None, verbosity=1):
     return all_activities, total_dist / 1000.0
 
 
-def get_year_range(year_list):
+def get_year_range(year_list: List[int]) -> str:
     """
     Transform a year list into a textual representation shortening consecutive values.
 
@@ -363,7 +368,6 @@ def get_year_range(year_list):
     Returns
     -------
     string
-
     """
     if (year_list is None) or (len(year_list) == 0):
         return 'all'
@@ -389,7 +393,7 @@ def get_year_range(year_list):
 
 
 # basemap
-def get_basemap_provider(provider_str):
+def get_basemap_provider(provider_str: str) -> ctx._providers.TileProvider:
     """
     Take a string representing the desired Contextily basemap provider,
     e.g., "Esri.WorldImagery", parse it, and provide the provider
@@ -410,7 +414,7 @@ def get_basemap_provider(provider_str):
     return b_provider
 
 
-def run_plotting(args):
+def run_plotting(args: argparse.Namespace) -> None:
     """
     Main plotting function
 
@@ -692,7 +696,7 @@ def run_plotting(args):
 
 
 ##
-def list_basemap_providers():
+def list_basemap_providers() -> None:
     """
     Print all map tile providers from Contextily
     """
@@ -708,14 +712,13 @@ def list_basemap_providers():
 
 
 ##
-def main(argv):
+def main(argv: List[str]) -> None:
     """
     Top level input argument parsing.
 
     Parameters
     ----------
     argv : list of string
-
     """
     argparser = argparse.ArgumentParser()
     argparser.add_argument('--sport',
