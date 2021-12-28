@@ -52,6 +52,7 @@ dependencies:
     - click-plugins==1.1.1
     - cligj==0.7.1
     - contextily==1.1.0
+    - xyzservices
     - fitparse==1.2.0
     - geographiclib==1.50
     - geopy==2.1.0

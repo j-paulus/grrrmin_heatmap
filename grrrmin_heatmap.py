@@ -10,8 +10,8 @@
 #
 #
 # Usage examples:
-#  # all steps activities from year 2020, figure limited to north Nuremberg:
-#  python grrrmin_heatmap.py --bounding_box 11.16 49.524 11.015 49.452 --year 2020 --zoom_level 15 --sport steps
+#  # all steps activities from year 2021, figure limited to north Nuremberg:
+#  python grrrmin_heatmap.py --bounding_box 11.16 49.524 11.015 49.452 --year 2021 --zoom_level 15 --sport steps
 #
 #  # steps activities from all time, figure centered in Feucht:
 #  python grrrmin_heatmap.py --sport steps --zoom_level 15 --start_center 49.383 11.2185 --start_max_dist 100.0 --bb_percentile 0.0
@@ -59,6 +59,16 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 
+"""
+Decent (and free) alternatives for background tiles:
+- CartoDB.DarkMatter
+- CartoDB.DarkMatterNoLabels
+- Esri.WorldImagery
+- OpenStreetMap.BlackAndWhite
+- Stamen.TonerBackground
+- HikeBike.HikeBike
+"""
+
 import sys
 import sqlite3  # interface GarminDB
 import datetime
@@ -78,7 +88,10 @@ from typing import Optional, Tuple, List, Any
 import numpy as np
 import matplotlib  # colormap
 
-import contextily as ctx  # basemap
+# basemap
+import contextily as ctx
+import xyzservices
+import xyzservices.providers as xyz
 
 # coordinate transforms
 import pyproj
@@ -396,28 +409,6 @@ def get_year_range(year_list: List[int]) -> str:
         return out_str
 
 
-# basemap
-def get_basemap_provider(provider_str: str) -> ctx._providers.TileProvider:
-    """
-    Take a string representing the desired Contextily basemap provider,
-    e.g., "Esri.WorldImagery", parse it, and provide the provider
-    instance contextily.providers.Esri.WorldImagery, if found.
-    """
-    provider_parts = provider_str.split('.')
-
-    b_provider = None
-    for one_part in provider_parts:
-        if b_provider is None:
-            b_provider = getattr(ctx.providers, one_part, None)
-        else:
-            b_provider = getattr(b_provider, one_part, None)
-
-        if b_provider is None:
-            print('ERROR: Unsupported basemap provider "{}" requested.'.format(provider_str))
-
-    return b_provider
-
-
 def run_plotting(args: argparse.Namespace) -> None:
     """
     Main plotting function
@@ -705,14 +696,28 @@ def list_basemap_providers() -> None:
     Print all map tile providers from Contextily
     """
     print('INFO: Supported background map tile providers:')
-    prov_keys = ctx.providers.keys()
-    for prov in prov_keys:
-        p2 = getattr(ctx.providers, prov).keys()
-        if 'url' in p2:
-            print(prov)
-        else:
-            for k in p2:
-                print('{}.{}'.format(prov, k))
+    all_providers = list(xyz.flatten().keys())
+    all_providers.sort()
+    for one_prov_name in all_providers:
+        one_prov = get_basemap_provider(one_prov_name)
+        requires_key = one_prov.requires_token()
+        print('{} (API key required: {})'.format(one_prov_name, requires_key))
+
+
+# basemap
+def get_basemap_provider(provider_str: str) -> Optional[xyzservices.TileProvider]:
+    """
+    Take a string representing the desired Contextily basemap provider,
+    e.g., "Esri.WorldImagery", parse it, and provide the provider
+    instance xyzservices.providers.Esri.WorldImagery, if found or None.
+    """
+    b_provider = None
+    try:
+        b_provider = xyz.query_name(provider_str)
+    except ValueError:
+         print('ERROR: Unsupported basemap provider "{}" requested.'.format(provider_str))
+
+    return b_provider
 
 
 ##
