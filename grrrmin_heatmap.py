@@ -96,13 +96,15 @@ import gpxpy.gpx
 
 import tcxparser  # .tcx file support
 
-__version__ = '0.3.5'
+__version__ = '0.3.6'
 
 geod_conv = pyproj.Geod(ellps='WGS84')
 
 
-def get_activities_from_db(sport_name: str='steps', target_year: Optional[int]=None,
-                           garmin_db: Optional[str]=None, verbosity: int=1) \
+def get_activities_from_db(sport_name: str='steps',
+                           target_year: Optional[int]=None,
+                           garmin_db: Optional[str]=None,
+                           verbosity: int=1) \
                            -> Tuple[List[List[Tuple[float, float]]], float]:
     """
     Load requested activities from GarminDB SQLite database.
@@ -210,7 +212,9 @@ def get_activities_from_db(sport_name: str='steps', target_year: Optional[int]=N
     return all_paths, total_dist
 
 
-def get_activities_from_dir(path_str: str, target_year: Optional[int]=None, verbosity: int=1) \
+def get_activities_from_dir(path_str: str,
+                            target_year: Optional[int]=None,
+                            verbosity: int=1) \
                             -> Tuple[List[List[Tuple[float, float, float]]], float]:
     """
     Check recursively all files in the given directory and if they are
@@ -274,7 +278,7 @@ def get_activities_from_dir(path_str: str, target_year: Optional[int]=None, verb
 
                     # convert the coordinates from the semicircle to decimal degrees
                     if (this_lat is not None) and (this_lon is not None):
-                        this_act.append((semi2deg(this_lat), semi2deg(this_lon)), this_altitude)
+                        this_act.append((semi2deg(this_lat), semi2deg(this_lon), this_altitude))
 
                     if this_dist is not None:
                         act_dist = this_dist
