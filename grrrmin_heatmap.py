@@ -109,7 +109,7 @@ import gpxpy.gpx
 
 import tcxparser  # .tcx file support
 
-__version__ = '0.3.6'
+__version__ = '0.3.7'
 
 geod_conv = pyproj.Geod(ellps='WGS84')
 
@@ -195,6 +195,10 @@ def get_activities_from_db(sport_name: str='steps',
             act_id = one_row[0]
             act_date = one_row[3]
             act_dist = one_row[6]
+
+            if (act_date is None) or (act_dist is None) or (act_id is None):
+                # skip
+                continue
 
             act_id_list.append(act_id)
             act_time_list.append(datetime.datetime.strptime(act_date, '%Y-%m-%d %H:%M:%S.%f'))
