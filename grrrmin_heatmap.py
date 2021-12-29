@@ -109,7 +109,11 @@ import gpxpy.gpx
 
 import tcxparser  # .tcx file support
 
-__version__ = '0.3.7'
+__version__ = '0.3.8'
+
+# attribution string layer location in image: 'below' tracks, 'above' tracks, or 'omit' completely
+ATTR_LOC = 'above'
+
 
 geod_conv = pyproj.Geod(ellps='WGS84')
 
@@ -613,9 +617,12 @@ def run_plotting(args: argparse.Namespace) -> None:
         basemap_img[:, :, -1] = zero_alpha[:, :, 0]
         basemap_image = Image.fromarray(basemap_img)
 
-    # add attribution
-    basemap_draw = ImageDraw.Draw(basemap_image)
-    basemap_draw.text((5, 5), 'Created with grrrmin_heatmap.py' + (basemap_attr is not None)*'\nUsing Contextily basemap:\n{}'.format(basemap_attr))
+    # attribution string, including basemap attribution
+    attr_str = 'Created with grrrmin_heatmap.py v.' + __version__ + (basemap_attr is not None)*'\nUsing Contextily basemap:\n{}'.format(basemap_attr)
+    # add attribution below the tracks
+    if ATTR_LOC == 'below':
+        basemap_draw = ImageDraw.Draw(basemap_image)
+        basemap_draw.text((5, 5), attr_str)
 
     # a function to transform geographical coordinates to PIL coordinates: (0,0) upper left corner. (x, y)
     def coord_to_pixel(lat, lon):
@@ -680,18 +687,28 @@ def run_plotting(args: argparse.Namespace) -> None:
             # overlay sum path on the basemap
             out_image = Image.alpha_composite(basemap_image, path_sum_image)
 
+            if ATTR_LOC == 'above':
+                # add attribution on top of the whole
+                out_draw = ImageDraw.Draw(out_image)
+                out_draw.text((5, 5), 'Created with grrrmin_heatmap.py' + (basemap_attr is not None)*'\nUsing Contextily basemap:\n{}'.format(basemap_attr))
+
             if args.do_gif:
                 all_frames.append(out_image)
             else:
                 out_file_name = '{}.png'.format(out_name_base)
                 out_image.save(out_file_name)
+                print('INFO: Resulting image written into "{}".'.format(out_file_name))
 
     if args.do_gif:
-        all_frames[0].save('{}.gif'.format(out_name_base),
+        out_file_name = '{}.gif'.format(out_name_base)
+        all_frames[0].save(out_file_name,
                            save_all=True,
                            append_images=all_frames[1:],
                            loop=False,
                            duration=1.0 / args.fps)
+        print('INFO: Resulting animation written into "{}".'.format(out_file_name))
+
+    print('INFO: Image attribution information:\n{}'.format(attr_str))
 
 
 ##
