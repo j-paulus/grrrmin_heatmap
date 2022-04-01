@@ -31,7 +31,7 @@
 #
 # License: BSD-3-Clause
 #
-# Copyright 2020-2021 Jouni Paulus
+# Copyright 2020-2022 Jouni Paulus
 #
 # Redistribution and use in source and binary forms, with or without modification,
 # are permitted provided that the following conditions are met:
@@ -109,7 +109,7 @@ import gpxpy.gpx
 
 import tcxparser  # .tcx file support
 
-__version__ = '0.3.8'
+__version__ = '0.3.9'
 
 # attribution string layer location in image: 'below' tracks, 'above' tracks, or 'omit' completely
 ATTR_LOC = 'above'
@@ -676,7 +676,11 @@ def run_plotting(args: argparse.Namespace) -> None:
         if args.do_gif or (path_idx == n_paths - 1):
             comp_sum = np.log2(1.0 + 1.0*path_sum)
 
-            # from a single float matrix to RGBA
+            if args.do_binary:
+                comp_sum = (comp_sum > 0)
+
+            # from a single float matrix to RGBA.
+            # ScalarMappable performs scaling of the data range
             comp_rgba = matplotlib.cm.ScalarMappable(norm=None, cmap=track_cmap).to_rgba(comp_sum, alpha=None, bytes=True, norm=True)  # to uint8
 
             # set alpha channel to 0 if no path occupies the pixel
@@ -854,6 +858,10 @@ def main(argv: List[str]) -> None:
                            type=int,
                            default=1,
                            help='message output verbosity. 0: silent, 1: default, 2: more info')
+
+    argparser.add_argument('--do_binary',
+                           action='store_true',
+                           help='binarize the resulting track (into presence / absence)')
 
     args = argparser.parse_args(argv)
     if args.basemap_provider.lower() == 'None'.lower():

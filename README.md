@@ -49,7 +49,8 @@ Command line options:
   - Only tracks starting near this point (lat, lon, in decimal WGS84) are plotted.
 - `--start_max_dist <float>`
   - Only tracks starting within this radius (in meters) from "start_center" are plotted.
-
+- `--do_binary`
+  - Binarize the sum track, i.e., ignore the "heat" and plot all with the same color.
 
 ### Examples
 - Plot all "steps" activities from the year 2020, figure limited to north Nuremberg:
@@ -72,4 +73,4 @@ Command line options:
 
 
 ## License
-Copyright (c) Jouni Paulus, 2020-2021, available under [BSD-3-Clause](https://opensource.org/licenses/BSD-3-Clause) license.
+Copyright (c) Jouni Paulus, 2020-2022, available under [BSD-3-Clause](https://opensource.org/licenses/BSD-3-Clause) license.
