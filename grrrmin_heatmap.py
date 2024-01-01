@@ -31,7 +31,7 @@
 #
 # License: BSD-3-Clause
 #
-# Copyright 2020-2022 Jouni Paulus
+# Copyright 2020-2024 Jouni Paulus
 #
 # Redistribution and use in source and binary forms, with or without modification,
 # are permitted provided that the following conditions are met:
@@ -109,7 +109,7 @@ import gpxpy.gpx
 
 import tcxparser  # .tcx file support
 
-__version__ = '0.3.9'
+__version__ = '0.3.10'
 
 # attribution string layer location in image: 'below' tracks, 'above' tracks, or 'omit' completely
 ATTR_LOC = 'above'
@@ -458,7 +458,7 @@ def run_plotting(args: argparse.Namespace) -> None:
     do_start_filter = (args.start_center is not None) and (args.start_max_dist is not None)
 
     if args.bounding_box is not None:  # n, e, s, w
-        max_lon, max_lat, min_lon, min_lat = args.bounding_box
+        max_lat, max_lon, min_lat, min_lon = args.bounding_box
 
     else:
         # determine from data
@@ -499,8 +499,7 @@ def run_plotting(args: argparse.Namespace) -> None:
                 if start_dist > args.start_max_dist:
                     # too far from the target starting location => skip the entire activity
                     if args.verbosity > 1:
-                        print('WARNING: Activity starting location {:.1f} m (>{:.1f} m) from the defined start location, skipping.'.format(start_dist,
-                                                                                                                                            args.start_max_dist))
+                        print('WARNING: Activity starting location {:.1f} m (>{:.1f} m) from the defined start location, skipping.'.format(start_dist, args.start_max_dist))
                     continue  # skip to next activity
 
             # distance-based filtering
@@ -543,7 +542,7 @@ def run_plotting(args: argparse.Namespace) -> None:
 
     if len(all_paths) == 0:
         if args.verbosity > 0:
-            print('WARNING: No mathing activities found.')
+            print('WARNING: No matching activities found.')
 
         sys.exit()
 
